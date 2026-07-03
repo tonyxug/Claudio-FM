@@ -1193,8 +1193,6 @@ const iconPause  = document.getElementById('iconPause');
 const playerTime   = document.getElementById('playerTime');
 const sessionTitleEl = document.getElementById('sessionTitle');
 const replayBtn    = document.getElementById('replayBtn');
-let lastTtsUrl = null;
-let lastReplaySegment = null;
 const scrubber   = document.getElementById('scrubber');
 const dotLive    = document.getElementById('dotLive');
 const headerStatus = document.getElementById('headerStatus');
@@ -1937,12 +1935,41 @@ function playCallerVoice(ttsUrl) {
 }
 
 /* ── Replay ───────────────────────────────────────────────────────── */
-replayBtn.addEventListener('click', () => {
-  const replayUrl = lastReplaySegment?.ttsUrl || lastTtsUrl;
-  if (!replayUrl) return;
-  ttsAudio.src = replayUrl;
-  ttsAudio.play().catch(console.error);
-});
+// Plays a list of { ttsUrl } segments back to back through ttsAudio, then calls onAllDone.
+function playIntroSequence(segments, onAllDone) {
+  const pending = [...segments];
+  function playOne() {
+    const segment = pending.shift();
+    if (!segment) {
+      if (onAllDone) onAllDone();
+      return;
+    }
+    ttsAudio.src = segment.ttsUrl;
+    ttsAudio.addEventListener('ended', playOne, { once: true });
+    ttsAudio.play().catch(err => { console.error(err); playOne(); });
+  }
+  playOne();
+}
+
+function replayCurrentTrackWithIntro() {
+  const track = queue[queueIdx];
+  if (!track) return;
+  ttsAudio.pause();
+  musicAudio.pause();
+  const intro = introSegmentsByTrack.get(queueIdx);
+  if (!intro) {
+    playTrack(track);
+    return;
+  }
+  if (intro.concurrent) {
+    playTrack(track);
+    playIntroSequence(intro.segments);
+  } else {
+    playIntroSequence(intro.segments, () => playTrack(track));
+  }
+}
+
+replayBtn.addEventListener('click', replayCurrentTrackWithIntro);
 
 /* ── Queue ────────────────────────────────────────────────────────── */
 let queue = [], queueIdx = 0;
@@ -1953,6 +1980,18 @@ let handledSegmentIds = new Set();
 let programClockStartedAt = null;
 let currentProgramId = null;
 let lastRefillAt = 0;
+
+// Remembers which DJ lines introduced each track, so replay can bring them back
+// alongside the song. `concurrent` tracks were talked-up over the song's own
+// start (cold open) rather than spoken before it began.
+let introSegmentsByTrack = new Map();
+
+function recordIntroSegments(trackIndex, segments, { concurrent = false } = {}) {
+  if (!Number.isInteger(trackIndex)) return;
+  const withVoice = (segments || []).filter(segment => segment?.ttsUrl);
+  if (!withVoice.length) return;
+  introSegmentsByTrack.set(trackIndex, { segments: withVoice, concurrent });
+}
 
 function segmentKey(segment) {
   if (!segment) return '';
@@ -1999,8 +2038,6 @@ function speakSegmentObject(segment, onEnd) {
     if (onEnd) onEnd();
     return;
   }
-  lastTtsUrl = segment.ttsUrl;
-  lastReplaySegment = segment;
   replayBtn.style.display = '';
   ttsAudio.src = segment.ttsUrl;
   if (onEnd) ttsAudio.addEventListener('ended', onEnd, { once: true });
@@ -2051,6 +2088,7 @@ function maybeStartOutroTalk() {
   );
   if (seamSegments.length) {
     segueStarted = true;
+    recordIntroSegments(queueIdx + 1, seamSegments);
     speakSegmentSequence(seamSegments);
     return;
   }
@@ -2059,6 +2097,7 @@ function maybeStartOutroTalk() {
     const next = queue[queueIdx + 1];
     if (next && next.introTtsUrl) {
       segueStarted = true;
+      recordIntroSegments(queueIdx + 1, [{ ttsUrl: next.introTtsUrl, text: next.introTranscript }]);
       speakSegment(next.introTranscript, next.introTtsUrl);
       return;
     }
@@ -2168,9 +2207,11 @@ function playNext() {
         playTrack(track);
       }
     } else if (beforeTrackSegments.length) {
+      recordIntroSegments(queueIdx, beforeTrackSegments);
       speakSegmentSequence(beforeTrackSegments, () => playTrack(track));
     } else if (track.introTtsUrl) {
       // Fallback (short song / seek): no outro segue happened, so talk now then play.
+      recordIntroSegments(queueIdx, [{ ttsUrl: track.introTtsUrl, text: track.introTranscript }]);
       speakSegment(track.introTranscript, track.introTtsUrl, () => playTrack(track));
     } else {
       playTrack(track);
@@ -2277,7 +2318,10 @@ function handleWsMessage(msg) {
       segment.position === 'immediate' ||
       (segment.position === 'before_track' && (segment.trackIndex ?? 0) === queueIdx)
     );
-    if (immediateSegments.length) speakSegmentSequence(immediateSegments);
+    if (immediateSegments.length) {
+      recordIntroSegments(queueIdx, immediateSegments, { concurrent: true });
+      speakSegmentSequence(immediateSegments);
+    }
     return;
   }
 
@@ -2348,8 +2392,10 @@ function handleWsMessage(msg) {
         segment.position === 'immediate' ||
         (segment.position === 'before_track' && (segment.trackIndex ?? 0) === queueIdx)
       );
-      if (immediateSegments.length) speakSegmentSequence(immediateSegments);
-      else if (msg.status === 'speaking') setRadioStatus('Speaking');
+      if (immediateSegments.length) {
+        recordIntroSegments(queueIdx, immediateSegments, { concurrent: true });
+        speakSegmentSequence(immediateSegments);
+      } else if (msg.status === 'speaking') setRadioStatus('Speaking');
     }
   }
 
