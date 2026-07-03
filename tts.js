@@ -51,8 +51,9 @@ function getVoiceForProvider(provider, options = {}) {
   return options.voice || process.env.KOKORO_VOICE || '';
 }
 
-function getVoiceTypeList() {
-  const raw = process.env.VOLCENGINE_TTS_VOICE_TYPE_LIST || '';
+function getVoiceTypeList(lang) {
+  const envVar = lang === 'zh' ? 'VOLCENGINE_TTS_VOICE_TYPE_LIST_ZH' : 'VOLCENGINE_TTS_VOICE_TYPE_LIST_EN';
+  const raw = process.env[envVar] || '';
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
 

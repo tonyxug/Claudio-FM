@@ -767,7 +767,7 @@ app.get('/api/plan/today', (req, res) => {
 });
 
 app.get('/api/tts/voices', (req, res) => {
-  res.json({ voices: getVoiceTypeList() });
+  res.json({ voices: getVoiceTypeList(normalizeDjLanguage(req.query.lang)) });
 });
 
 app.post('/api/tts/caller', async (req, res) => {
