@@ -214,6 +214,10 @@ async function startNeteaseIfNeeded() {
 }
 
 async function prepareNeteaseLogin(neteaseState) {
+  if (process.env.MUSIC_PROVIDER === 'yt-dlp') {
+    console.log('[netease-login] MUSIC_PROVIDER=yt-dlp; skipping Netease login.');
+    return;
+  }
   if (!neteaseState?.connected) {
     console.log('[netease-login] Netease sidecar is unavailable; login bootstrap skipped.');
     return;
