@@ -169,6 +169,11 @@ async function startNeteaseIfNeeded() {
   const required = boolEnv('NETEASE_REQUIRED', false);
   const baseUrl = neteaseBaseUrl();
 
+  if (process.env.MUSIC_PROVIDER === 'yt-dlp') {
+    console.log('[start] MUSIC_PROVIDER=yt-dlp; skipping Netease sidecar.');
+    return { connected: false, baseUrl, required: false };
+  }
+
   if (!autoStart) {
     console.log('[start] Netease sidecar auto-start disabled; checking existing service.');
     const status = await getNeteaseStatus(baseUrl);
